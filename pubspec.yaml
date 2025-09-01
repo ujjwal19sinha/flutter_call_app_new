@@ -5,7 +5,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.8.1
+  sdk: ^3.6.2
 
 dependencies:
   flutter:
@@ -19,6 +19,7 @@ dependencies:
   http: ^1.2.0
   uuid: ^4.4.0
   twilio_voice: ^0.3.2
+  dio: ^5.9.0
 
 
 
@@ -28,7 +29,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  #flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
