@@ -49,6 +49,7 @@
             android:name="com.hiennv.flutter_callkit_incoming.CallkitNotificationService"
             android:exported="true"
             tools:replace="android:permission"
+            tools:ignore="MissingPermission"
             android:permission="android.permission.BIND_JOB_SERVICE"/>
 
         <!-- Callkit Receiver -->
