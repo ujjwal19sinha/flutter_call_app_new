@@ -6,77 +6,173 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'services/call_service.dart';
 import 'services/twilio_service.dart';
 
-// Screens
 import 'screens/call_screen.dart';
 import 'screens/missed_call_screen.dart';
 import 'screens/incomingcallscreen.dart';
 
-// Firebase Background Handler
-
+// Background FCM handler
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   if (message.data['type'] == 'twilio_call') {
-    print("Background FCM: Incoming Twilio call");
+    print("Background FCM: Incoming Twilio call detected");
     await TwilioService.showIncomingCall(message.data);
   }
 }
-
-//  Main Function
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
 
-  // Register background FCM handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  await requestPermissions();
+  await _requestPermissions();
 
-  // Identity of this device (change to "userB" on second device)
-  const String currentIdentity = "userA";
-  await TwilioService.init(currentIdentity);
+  final prefs = await SharedPreferences.getInstance();
+  final savedIdentity = prefs.getString("user_identity");
 
-  // Setup CallKit event listener
-  _setupCallkitListener();
-
-  runApp(const MyApp());
+  if (savedIdentity != null && savedIdentity.isNotEmpty) {
+    await TwilioService.init(savedIdentity);
+    _setupCallkitListener();
+    runApp(MyApp(initialScreen: const HomeScreen()));
+  } else {
+    runApp(MyApp(initialScreen: const InputScreen()));
+  }
 }
 
-// Request notification and call-related permissions
-
-Future<void> requestPermissions() async {
+Future<void> _requestPermissions() async {
   await Permission.notification.request();
   await Permission.phone.request();
   await Permission.microphone.request();
-  await Permission.bluetooth.request(); // Needed for Android 12/13+
+  await Permission.bluetooth.request();
 }
-
-// Global navigator key for navigation inside listener callbacks
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// MyApp
-
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final Widget initialScreen;
+  const MyApp({super.key, required this.initialScreen});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      home: const HomeScreen(),
+      home: initialScreen,
     );
   }
 }
 
-// HomeScreen with test buttons
+// Input screen for username
+class InputScreen extends StatefulWidget {
+  const InputScreen({super.key});
+  @override
+  State<InputScreen> createState() => _InputScreenState();
+}
 
+class _InputScreenState extends State<InputScreen> {
+  final TextEditingController _controller = TextEditingController();
+
+  Future<void> _saveIdentity() async {
+    final username = _controller.text.trim();
+    if (username.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString("user_identity", username);
+
+    await TwilioService.init(username);
+    _setupCallkitListener();
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const HomeScreen()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("Enter Username")),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TextField(
+              controller: _controller,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: "Username",
+              ),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _saveIdentity,
+              child: const Text("Continue"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Home screen with call actions
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
+
+  Future<void> _showCallDialog(BuildContext context) async {
+    final controller = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text("Enter Username to Call"),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              hintText: "e.g. userB",
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final toUser = controller.text.trim();
+                if (toUser.isNotEmpty) {
+                  Navigator.pop(ctx);
+
+                  // Outgoing call via TwilioService
+                  await TwilioService.makeCall("client:$toUser");
+                  print("Outgoing call triggered to $toUser");
+
+                  if (navigatorKey.currentContext != null) {
+                    Navigator.of(navigatorKey.currentContext!).push(
+                      MaterialPageRoute(
+                        builder: (_) => CallScreen(
+                          callerName: "Calling $toUser",
+                          callerNumber: "client:$toUser",
+                        ),
+                      ),
+                    );
+                  }
+                }
+              },
+              child: const Text("Call"),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,8 +183,6 @@ class HomeScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const SizedBox(height: 20),
-
-            // Test: Show manual incoming call
             ElevatedButton(
               onPressed: () async {
                 CallKitParams params = CallKitParams(
@@ -110,8 +204,6 @@ class HomeScreen extends StatelessWidget {
               child: const Text("Show Incoming (Test)"),
             ),
             const SizedBox(height: 20),
-
-            // Test: Show missed call notification
             ElevatedButton(
               onPressed: () async {
                 CallKitParams params = CallKitParams(
@@ -132,25 +224,11 @@ class HomeScreen extends StatelessWidget {
               child: const Text("Missed Call"),
             ),
             const SizedBox(height: 20),
-
-            // Outgoing call via Twilio (works on two devices)
             ElevatedButton(
               onPressed: () async {
-                await CallService().makeCall("client:userB");
-
-                // Navigate to call screen for caller immediately
-                if (navigatorKey.currentContext != null) {
-                  Navigator.of(navigatorKey.currentContext!).push(
-                    MaterialPageRoute(
-                      builder: (_) => const CallScreen(
-                        callerName: "Calling userB",
-                        callerNumber: "client:userB",
-                      ),
-                    ),
-                  );
-                }
+                await _showCallDialog(context);
               },
-              child: const Text("Outgoing Call (to userB)"),
+              child: const Text("Outgoing Call"),
             ),
           ],
         ),
@@ -159,7 +237,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// CallKit Listener
+// CallKit listener setup
 void _setupCallkitListener() {
   FlutterCallkitIncoming.onEvent.listen((event) {
     if (event == null) return;
@@ -222,21 +300,7 @@ void _setupCallkitListener() {
   });
 }
 
-// Navigation Helpers
-
-void _navigateToCallScreen(String callerName, String callerNumber) {
-  if (navigatorKey.currentContext != null) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Navigator.of(navigatorKey.currentContext!).push(
-        MaterialPageRoute(
-          builder: (_) =>
-              CallScreen(callerName: callerName, callerNumber: callerNumber),
-        ),
-      );
-    });
-  }
-}
-
+// Navigate to missed call screen
 void _navigateToMissedCall(String callerName, String callerNumber) {
   if (navigatorKey.currentContext != null) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -252,6 +316,7 @@ void _navigateToMissedCall(String callerName, String callerNumber) {
   }
 }
 
+// Pop current screen safely
 void _popCurrentScreen() {
   if (navigatorKey.currentContext != null &&
       Navigator.canPop(navigatorKey.currentContext!)) {

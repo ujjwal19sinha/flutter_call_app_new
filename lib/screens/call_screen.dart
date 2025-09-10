@@ -1,5 +1,6 @@
+import 'package:call_notification/services/call_service.dart';
 import 'package:flutter/material.dart';
-import 'dart:math';
+import 'dart:async';
 
 class CallScreen extends StatefulWidget {
   final String callerName;
@@ -19,13 +20,41 @@ class _CallScreenState extends State<CallScreen> {
   bool isMuted = false;
   bool isSpeakerOn = false;
   bool isOnHold = false;
-  bool showKeypad = false; // Keypad toggle
-  String dialedNumber = ""; // Dialed number store karega
+  bool showKeypad = false;
+  String dialedNumber = "";
 
-  // Random highlight effect for buttons (future use)
-  Color _randomHighlight() {
-    final random = Random();
-    return Colors.white.withOpacity(0.5 + random.nextDouble() * 0.5);
+  int _secondsElapsed = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _secondsElapsed = 0;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _secondsElapsed++;
+      });
+    });
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+  }
+
+  String _formatDuration(int seconds) {
+    final minutes = seconds ~/ 60;
+    final remainingSeconds = seconds % 60;
+    return "${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}";
+  }
+
+  @override
+  void dispose() {
+    _stopTimer();
+    super.dispose();
   }
 
   @override
@@ -45,13 +74,13 @@ class _CallScreenState extends State<CallScreen> {
                 children: [
                   const SizedBox(height: 50),
 
-                  // Caller Info Section
+                  // Caller Info with Default Image
                   Column(
                     children: [
                       const CircleAvatar(
                         radius: 60,
                         backgroundImage: NetworkImage(
-                          "https://randomuser.me/api/portraits/men/2.jpg",
+                          "https://i.pravatar.cc/108", // Default fallback image
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -67,13 +96,13 @@ class _CallScreenState extends State<CallScreen> {
                       ),
                       Text(
                         widget.callerNumber,
-                        style: const TextStyle(
-                            color: Colors.grey, fontSize: 18),
+                        style:
+                            const TextStyle(color: Colors.grey, fontSize: 18),
                       ),
                       const SizedBox(height: 10),
-                      const Text(
-                        "00:25",
-                        style: TextStyle(
+                      Text(
+                        _formatDuration(_secondsElapsed),
+                        style: const TextStyle(
                             color: Colors.white70, fontSize: 16),
                       ),
                     ],
@@ -108,9 +137,8 @@ class _CallScreenState extends State<CallScreen> {
                           },
                         ),
                         _buildControlButton(
-                          icon: isSpeakerOn
-                              ? Icons.volume_up
-                              : Icons.volume_mute,
+                          icon:
+                              isSpeakerOn ? Icons.volume_up : Icons.volume_mute,
                           label: "Speaker",
                           onPressed: () {
                             setState(() {
@@ -141,7 +169,7 @@ class _CallScreenState extends State<CallScreen> {
                     ),
                   ),
 
-                  // End Call Button Section
+                  // End Call Button
                   Padding(
                     padding: const EdgeInsets.only(bottom: 30),
                     child: ElevatedButton(
@@ -150,8 +178,18 @@ class _CallScreenState extends State<CallScreen> {
                         shape: const CircleBorder(),
                         padding: const EdgeInsets.all(20),
                       ),
-                      onPressed: () {
-                        Navigator.pop(context);
+                      onPressed: () async {
+                        print("Hangup initiated");
+                        try {
+                          await CallService().hangUp(); // Hang-up Twilio call
+                          print("Hangup success");
+                        } catch (e) {
+                          print("Hangup failed: $e");
+                        } finally {
+                          _stopTimer();
+                          print("Call hung up");
+                          Navigator.pop(context);
+                        }
                       },
                       child: const Icon(Icons.call_end,
                           color: Colors.white, size: 32),
@@ -167,13 +205,11 @@ class _CallScreenState extends State<CallScreen> {
               child: Align(
                 alignment: Alignment.bottomCenter,
                 child: Container(
-                  height: screenHeight * 0.6, // 60% of screen height
+                  height: screenHeight * 0.6,
                   color: Colors.black,
                   child: Column(
                     children: [
                       const SizedBox(height: 10),
-
-                      // Dialed number display line
                       Container(
                         padding: const EdgeInsets.all(12),
                         alignment: Alignment.center,
@@ -185,10 +221,7 @@ class _CallScreenState extends State<CallScreen> {
                               fontWeight: FontWeight.bold),
                         ),
                       ),
-
                       const SizedBox(height: 10),
-
-                      // Keypad Buttons
                       Expanded(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -232,8 +265,7 @@ class _CallScreenState extends State<CallScreen> {
                         ),
                       ),
 
-
-                      // Back Button Section (properly visible now)
+                      // Back Button
                       Padding(
                         padding: const EdgeInsets.only(bottom: 20, top: 10),
                         child: ElevatedButton(
@@ -244,7 +276,7 @@ class _CallScreenState extends State<CallScreen> {
                           ),
                           onPressed: () {
                             setState(() {
-                              showKeypad = false; // Back to call screen
+                              showKeypad = false;
                             });
                           },
                           child: const Icon(Icons.arrow_back,
@@ -262,7 +294,6 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  // Control Buttons Widget (Mute, Speaker, Hold etc.)
   Widget _buildControlButton({
     required IconData icon,
     required String label,
@@ -284,21 +315,18 @@ class _CallScreenState extends State<CallScreen> {
             child: Icon(icon, color: Colors.white, size: 22),
           ),
           const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
-          ),
+          Text(label,
+              style: const TextStyle(color: Colors.white, fontSize: 14)),
         ],
       ),
     );
   }
 
-  // Keypad Button Widget
   Widget _buildKeypadButton(String text) {
     return GestureDetector(
       onTap: () {
         setState(() {
-          dialedNumber += text; // Pressed number show in display
+          dialedNumber += text;
         });
       },
       child: Container(
@@ -311,10 +339,7 @@ class _CallScreenState extends State<CallScreen> {
           child: Text(
             text,
             style: const TextStyle(
-              color: Colors.white,
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-            ),
+                color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold),
           ),
         ),
       ),
